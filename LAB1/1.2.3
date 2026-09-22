@@ -1,0 +1,31 @@
+#include "iostream"
+#include "thread"
+#include "list"
+#include "algorithm"
+#include "mutex"
+
+std::list <int> l;
+std::mutex m;
+
+void AddToList(int start) {
+    for (int i = 0; i < 10; ++i) {
+        l.push_back(start + i);
+        std::cout << "Added: " << start + i << '\n';
+    }
+}
+
+void ListContains(int val) {
+    for (int i = 0; i < 10; ++i) {
+        bool found = std::find(l.begin(), l.end(), val) != l.end();
+        std::cout << "Contains " << val << ": " << found << '\n';
+    }
+}
+
+int main() {
+    int val = 5;
+    std::thread t1(AddToList, val);
+    std::thread t2(ListContains, val);
+    t1.join();
+    t2.join();
+    return 0;
+}
