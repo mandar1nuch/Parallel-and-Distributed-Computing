@@ -1,0 +1,11 @@
+#include "iostream"
+#include "thread"
+
+void Thread1() { std::cout << 1 << '\n'; }
+void Thread2() { std::cout << 2 << '\n'; }
+
+int main() {
+    std::thread(Thread1).detach();
+    std::thread(Thread2).detach();
+    return 0;
+}
