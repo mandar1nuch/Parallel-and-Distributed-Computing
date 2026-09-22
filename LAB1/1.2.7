@@ -1,0 +1,54 @@
+#include "iostream"
+#include "thread"
+#include "mutex"
+#include "string"
+#include "chrono"
+
+struct someData {
+    std::string name, surname, address;
+    int age = 0;
+};
+
+class exchangePerson {
+public:
+    someData data;
+    std::mutex m;
+
+    static void JohnDoe(exchangePerson& p) {
+        std::lock_guard< std::mutex > lock(p.m);
+        p.data = {"John", "Doe", "Unknown", 120};
+    }
+
+    static void JacobSmith(exchangePerson& p) {
+        std::lock_guard< std::mutex > lock(p.m);
+        p.data = {"Jacob", "Smith", "Known", 1};
+    }
+
+    static void Swap(exchangePerson& p1, exchangePerson& p2) {
+        if (&p1 == &p2) return;
+        
+        std::unique_lock< std::mutex > lock1(p1.m, std::defer_lock);
+        std::unique_lock< std::mutex > lock2(p2.m, std::defer_lock);
+        std::lock(lock1, lock2);
+        
+        std::cout << "Before swap: " << p1.data.name << " & " << p2.data.name << '\n';
+        std::swap(p1.data, p2.data);
+        std::cout << "After swap: " << p1.data.name << " & " << p2.data.name << '\n';
+    }
+};
+
+int main() {
+    exchangePerson p1, p2;
+    p1.data.name = "Initial_1";
+    p2.data.name = "Initial_2";
+
+    std::thread(exchangePerson::JohnDoe, std::ref(p1)).detach();
+    std::thread(exchangePerson::JacobSmith, std::ref(p2)).detach();
+    
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    std::thread t3(exchangePerson::Swap, std::ref(p1), std::ref(p2));
+    t3.join();
+
+    return 0;
+}
