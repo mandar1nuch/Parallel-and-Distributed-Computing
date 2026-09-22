@@ -1,0 +1,12 @@
+#include "iostream"
+#include "thread"
+#include "chrono"
+
+void Thread1() { std::cout << 1 << '\n'; }
+void Thread2() { std::cout << 2 << '\n'; }
+
+int main() {
+    std::thread t1(Thread1);
+    std::thread t2(Thread2);
+    return 0;
+}
