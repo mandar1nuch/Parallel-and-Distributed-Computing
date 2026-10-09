@@ -1,0 +1,424 @@
+#include <iostream>
+#include <queue>
+#include <deque>
+#include <vector>
+#include <string>
+#include <utility>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <future>
+#include <chrono>
+#include <cmath>
+#include <limits>
+#include <cstdlib>
+using namespace std;
+using ull = unsigned long long;
+using Clock = chrono::steady_clock;
+
+bool isPrime(long long n)
+{
+    if (n < 2) return false;
+    if (n < 4) return true;
+    if (n % 2 == 0) return false;
+    for (long long d = 3; d * d <= n; d += 2)
+        if (n % d == 0) return false;
+    return true;
+}
+
+ull nthPrime(ull n)
+{
+    if (n == 0) return 0;
+    vector<ull> primes;
+    primes.reserve(n);
+    primes.push_back(2);
+    for (ull c = 3; primes.size() < n; c += 2)
+    {
+        bool ok = true;
+        for (ull p : primes)
+        {
+            if (p * p > c) break;
+            if (c % p == 0) { ok = false; break; }
+        }
+        if (ok) primes.push_back(c);
+    }
+    return primes[n - 1];
+}
+
+void clearInput()
+{
+    cin.clear();
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+}
+
+namespace t1
+{
+    queue<int> dataQueue;
+    mutex m;
+    bool flag;
+
+    void DataPreparation()
+    {
+        cout << "Вводьте цілі числа (будь-який нечисловий символ - кінець введення):\n";
+        int x;
+        while (cin >> x)
+        {
+            lock_guard<mutex> lk(m);
+            dataQueue.push(x);
+        }
+        lock_guard<mutex> lk(m);
+        flag = true;
+    }
+
+    void DataProcessing()
+    {
+        unique_lock<mutex> lk(m);
+        while (!flag)
+        {
+            lk.unlock();
+            this_thread::sleep_for(chrono::milliseconds(100));
+            lk.lock();
+        }
+        cout << "Прості числа з черги:\n";
+        while (!dataQueue.empty())
+        {
+            int v = dataQueue.front();
+            dataQueue.pop();
+            if (isPrime(v)) cout << v << " ";
+        }
+        cout << endl;
+    }
+
+    void run()
+    {
+        dataQueue = queue<int>();
+        flag = false;
+        thread prep(DataPreparation);
+        prep.detach();
+        thread proc(DataProcessing);
+        proc.join();
+        clearInput();
+    }
+}
+
+namespace t2
+{
+    mutex m;
+    condition_variable cv;
+    int i;
+
+    void Waits(int id)
+    {
+        unique_lock<mutex> lk(m);
+        cout << "Потік Waits " << id << ": входжу у стан очікування\n";
+        cv.wait(lk, [] { return i == 1; });
+        cout << "Потік Waits " << id << ": очікування завершене\n";
+    }
+
+    void Awake()
+    {
+        this_thread::sleep_for(chrono::milliseconds(100));
+        {
+            lock_guard<mutex> lk(m);
+            cout << "Awake: починаю повідомляти решту потоків\n";
+        }
+        cv.notify_all();
+        this_thread::sleep_for(chrono::milliseconds(100));
+        {
+            lock_guard<mutex> lk(m);
+            i = 1;
+            cout << "Awake: повторне повідомлення\n";
+        }
+        cv.notify_all();
+    }
+
+    void run()
+    {
+        i = 0;
+        thread w1(Waits, 1), w2(Waits, 2), w3(Waits, 3);
+        thread a(Awake);
+        a.join();
+        w1.join();
+        w2.join();
+        w3.join();
+    }
+}
+
+namespace t3
+{
+    struct State
+    {
+        mutex m;
+        condition_variable cv;
+        int i = 0;
+    };
+
+    void Worker(State* s, int id)
+    {
+        unique_lock<mutex> lk(s->m);
+        cout << "Потік " << id << ": очікую на сигнал\n";
+        s->cv.wait(lk, [s] { return s->i == 1; });
+        cout << "Повідомлення з потоку " << id << endl;
+    }
+
+    void Notify(State* s)
+    {
+        this_thread::sleep_for(chrono::milliseconds(100));
+        {
+            lock_guard<mutex> lk(s->m);
+            s->i = 1;
+            cout << "Notify: пробуджую один потік\n";
+        }
+        s->cv.notify_one();
+    }
+
+    void run()
+    {
+        State* s = new State;
+        thread t1(Worker, s, 1), t2(Worker, s, 2), t3(Worker, s, 3);
+        t1.detach();
+        t2.detach();
+        t3.detach();
+        thread n(Notify, s);
+        n.join();
+        this_thread::sleep_for(chrono::milliseconds(200));
+    }
+}
+
+namespace t4
+{
+    queue<int> dataQueue;
+    mutex m;
+    condition_variable cv;
+    bool finished;
+
+    void DataPreparation()
+    {
+        cout << "Вводьте цілі числа (будь-який нечисловий символ - кінець введення):\n";
+        int x;
+        while (cin >> x)
+        {
+            {
+                lock_guard<mutex> lk(m);
+                dataQueue.push(x);
+            }
+            cv.notify_one();
+        }
+        {
+            lock_guard<mutex> lk(m);
+            finished = true;
+        }
+        cv.notify_one();
+    }
+
+    void DataProcessing()
+    {
+        cout << "Прості числа:\n";
+        while (true)
+        {
+            unique_lock<mutex> lk(m);
+            cv.wait(lk, [] { return !dataQueue.empty() || finished; });
+            while (!dataQueue.empty())
+            {
+                int v = dataQueue.front();
+                dataQueue.pop();
+                if (isPrime(v)) cout << v << " " << flush;
+            }
+            if (finished) break;
+        }
+        cout << endl;
+    }
+
+    void run()
+    {
+        dataQueue = queue<int>();
+        finished = false;
+        thread prep(DataPreparation);
+        prep.detach();
+        thread proc(DataProcessing);
+        proc.join();
+        clearInput();
+    }
+}
+
+namespace t5
+{
+    void run()
+    {
+        ull n;
+        int mode;
+        cout << "Введіть n (номер простого числа): ";
+        cin >> n;
+        cout << "Режим запуску (1 - deferred, 2 - async): ";
+        cin >> mode;
+        launch policy = (mode == 1) ? launch::deferred : launch::async;
+
+        auto start = Clock::now();
+        future<ull> f = async(policy, nthPrime, n);
+        cout << "Обчислення запущено (" << (mode == 1 ? "deferred" : "async") << ").\n";
+
+        int choice;
+        cout << "Оберіть функцію від n (1 - sqrt, 2 - sin, 3 - ln): ";
+        cin >> choice;
+        switch (choice)
+        {
+        case 1: cout << "sqrt(" << n << ") = " << sqrt((double)n) << endl; break;
+        case 2: cout << "sin(" << n << ") = " << sin((double)n) << endl; break;
+        case 3: cout << "ln(" << n << ") = " << log((double)n) << endl; break;
+        default: cout << "Невідомий вибір\n";
+        }
+
+        auto waitStart = Clock::now();
+        ull result = f.get();
+        auto end = Clock::now();
+
+        cout << n << "-те просте число: " << result << endl;
+        cout << "Час очікування на результат (get): "
+             << chrono::duration<double>(end - waitStart).count() << " c\n";
+        cout << "Загальний час від запуску: "
+             << chrono::duration<double>(end - start).count() << " c\n";
+    }
+}
+
+namespace t6
+{
+    using Task = packaged_task<ull(ull)>;
+
+    deque<Task> tasks;
+    deque<ull> numbers;
+    mutex m;
+    condition_variable cv;
+    bool stopFlag;
+
+    void Worker()
+    {
+        while (true)
+        {
+            Task task;
+            ull n;
+            {
+                unique_lock<mutex> lk(m);
+                cv.wait(lk, [] { return stopFlag || !tasks.empty(); });
+                if (tasks.empty()) return;
+                task = move(tasks.front());
+                tasks.pop_front();
+                n = numbers.front();
+                numbers.pop_front();
+            }
+            task(n);
+        }
+    }
+
+    void run()
+    {
+        stopFlag = false;
+        thread worker(Worker);
+        vector<pair<ull, future<ull>>> results;
+
+        while (true)
+        {
+            cout << "Введіть n (q - стоп): ";
+            string s;
+            if (!(cin >> s) || s == "q" || s == "Q") break;
+            ull n;
+            try { n = stoull(s); }
+            catch (...) { cout << "Некоректне число\n"; continue; }
+            if (n == 0) { cout << "n має бути >= 1\n"; continue; }
+
+            Task task(nthPrime);
+            results.emplace_back(n, task.get_future());
+            {
+                lock_guard<mutex> lk(m);
+                tasks.push_back(move(task));
+                numbers.push_back(n);
+            }
+            cv.notify_one();
+        }
+
+        for (auto& r : results)
+            cout << r.first << "-те просте число: " << r.second.get() << endl;
+
+        {
+            lock_guard<mutex> lk(m);
+            stopFlag = true;
+        }
+        cv.notify_one();
+        worker.join();
+        clearInput();
+    }
+}
+
+namespace t7
+{
+    void First(ull n, promise<ull> p1, promise<bool> signal, promise<ull> p2)
+    {
+        p1.set_value(nthPrime(n));
+        signal.set_value(true);
+        p2.set_value(nthPrime(n * 10));
+    }
+
+    void Second(ull n, future<bool> signal)
+    {
+        signal.get();
+        this_thread::sleep_for(chrono::seconds(2));
+        cout << "[Потік 2] sqrt(" << n << ") = " << sqrt((double)n) << endl;
+    }
+
+    void run()
+    {
+        ull n;
+        cout << "Введіть n: ";
+        cin >> n;
+
+        promise<ull> p1, p2;
+        promise<bool> sig;
+        future<ull> f1 = p1.get_future();
+        future<ull> f2 = p2.get_future();
+        future<bool> fs = sig.get_future();
+
+        thread a(First, n, move(p1), move(sig), move(p2));
+        thread b(Second, n, move(fs));
+
+        cout << n << "-те просте число: " << f1.get() << endl;
+        cout << (n * 10) << "-те просте число: " << f2.get() << endl;
+
+        a.join();
+        b.join();
+    }
+}
+
+int main()
+{
+    while (true)
+    {
+        cout << "\n===== Лабораторна робота №2 =====\n"
+             << "1 - Прапорець + sleep_for (1.2.1)\n"
+             << "2 - notify_all, три потоки Waits (1.2.2)\n"
+             << "3 - notify_one, три потоки (1.2.3)\n"
+             << "4 - Умовні змінні замість прапорця (1.2.4)\n"
+             << "5 - std::async: deferred / async (1.2.5)\n"
+             << "6 - packaged_task та деки (1.2.6)\n"
+             << "7 - promise / future (1.2.7)\n"
+             << "0 - Вихід\n"
+             << "Ваш вибір: ";
+        int choice;
+        if (!(cin >> choice)) break;
+        cout << endl;
+        switch (choice)
+        {
+        case 1: t1::run(); break;
+        case 2: t2::run(); break;
+        case 3: t3::run(); break;
+        case 4: t4::run(); break;
+        case 5: t5::run(); break;
+        case 6: t6::run(); break;
+        case 7: t7::run(); break;
+        case 0:
+            cout << flush;
+            _Exit(0);
+        default: cout << "Невідомий пункт меню\n";
+        }
+    }
+    cout << flush;
+    _Exit(0);
+}
